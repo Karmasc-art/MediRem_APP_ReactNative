@@ -67,6 +67,14 @@ export async function updateMedicine(
   );
 }
 
+export async function setNotificationIds(id: number, ids: string[]): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("UPDATE medicines SET notificationIds = ? WHERE id = ?", [
+    JSON.stringify(ids),
+    id,
+  ]);
+}
+
 export async function deleteMedicine(userId: string, id: number): Promise<void> {
   const db = await getDb();
   await db.runAsync("DELETE FROM dose_logs WHERE medicineId = ?", [id]);

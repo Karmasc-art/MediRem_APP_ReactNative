@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
@@ -6,6 +6,8 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { MainTabParamList, RootStackParamList } from "../types/navigation";
 import { useAuth } from "../services/AuthContext";
+import { cancelAllReminders, rescheduleAll } from "../services/notificationService";
+import { reportError } from "../utils/errorHandler";
 import { colors } from "../utils/theme";
 
 import LoadingView from "../components/LoadingView";
@@ -42,20 +44,12 @@ function MainTabs() {
         tabBarInactiveTintColor: colors.textMuted,
         tabBarStyle: { height: 62, paddingBottom: 8, paddingTop: 6 },
         tabBarIcon: ({ focused, color, size }) => (
-          <Ionicons
-            name={tabIcons[route.name][focused ? 0 : 1]}
-            size={size}
-            color={color}
-          />
+          <Ionicons name={tabIcons[route.name][focused ? 0 : 1]} size={size} color={color} />
         ),
       })}
     >
       <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen
-        name="Medicines"
-        component={MedicineListScreen}
-        options={{ title: "Medicine" }}
-      />
+      <Tab.Screen name="Medicines" component={MedicineListScreen} options={{ title: "Medicine" }} />
       <Tab.Screen name="History" component={HistoryScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
@@ -64,6 +58,16 @@ function MainTabs() {
 
 export default function RootNavigator() {
   const { user, loading } = useAuth();
+
+  // Rebuild reminders when a user signs in; clear them when signed out.
+  useEffect(() => {
+    if (loading) return;
+    if (user) {
+      rescheduleAll(user.uid).catch((e) => reportError("reschedule reminders", e));
+    } else {
+      cancelAllReminders().catch((e) => reportError("cancel reminders", e));
+    }
+  }, [user?.uid, loading]);
 
   if (loading) {
     return <LoadingView message="Checking your session..." />;
@@ -80,44 +84,16 @@ export default function RootNavigator() {
       >
         {user ? (
           <>
-            <Stack.Screen
-              name="Main"
-              component={MainTabs}
-              options={{ headerShown: false }}
-            />
-            <Stack.Screen
-              name="AddMedicine"
-              component={AddMedicineScreen}
-              options={{ title: "Add Medicine" }}
-            />
-            <Stack.Screen
-              name="MedicineDetails"
-              component={MedicineDetailsScreen}
-              options={{ title: "Medicine Details" }}
-            />
-            <Stack.Screen
-              name="Settings"
-              component={SettingsScreen}
-              options={{ title: "Notification Settings" }}
-            />
+            <Stack.Screen name="Main" component={MainTabs} options={{ headerShown: false }} />
+            <Stack.Screen name="AddMedicine" component={AddMedicineScreen} options={{ title: "Add Medicine" }} />
+            <Stack.Screen name="MedicineDetails" component={MedicineDetailsScreen} options={{ title: "Medicine Details" }} />
+            <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: "Notification Settings" }} />
           </>
         ) : (
           <>
-            <Stack.Screen
-              name="Welcome"
-              component={WelcomeScreen}
-              options={{ headerShown: false }}
-            />
-            <Stack.Screen
-              name="Login"
-              component={LoginScreen}
-              options={{ headerShown: false }}
-            />
-            <Stack.Screen
-              name="Register"
-              component={RegisterScreen}
-              options={{ headerShown: false }}
-            />
+            <Stack.Screen name="Welcome" component={WelcomeScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
           </>
         )}
       </Stack.Navigator>

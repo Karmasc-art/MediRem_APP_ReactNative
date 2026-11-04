@@ -10,6 +10,7 @@
       "supportsTablet": true
     },
     "android": {
+      "permissions": ["POST_NOTIFICATIONS", "SCHEDULE_EXACT_ALARM"],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -24,7 +25,15 @@
     "plugins": [
       "expo-sqlite",
       "@react-native-community/datetimepicker",
-      "expo-font"
+      "expo-font",
+      ["expo-notifications", { "color": "#2E7D32" }],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "MediRem needs your photos so you can attach a picture to a medicine.",
+          "cameraPermission": "MediRem needs the camera so you can take a picture of your medicine."
+        }
+      ]
     ]
   }
 }

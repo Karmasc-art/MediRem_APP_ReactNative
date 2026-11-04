@@ -12,7 +12,7 @@ import LoadingView from "../components/LoadingView";
 import { addDays, formatDateLong, formatTime } from "../utils/dateUtils";
 import { reportError } from "../utils/errorHandler";
 import { colors, radius, shadow, spacing } from "../utils/theme";
-
+import { cancelReminders } from "../services/notificationService";
 type Props = NativeStackScreenProps<RootStackParamList, "MedicineDetails">;
 
 function Row({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
@@ -58,6 +58,7 @@ export default function MedicineDetailsScreen({ navigation, route }: Props) {
         style: "destructive",
         onPress: async () => {
           try {
+            await cancelReminders(medicine.notificationIds);
             await deleteMedicine(user.uid, medicine.id);
             navigation.goBack();
           } catch (e) {

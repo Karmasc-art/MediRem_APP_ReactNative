@@ -1,13 +1,18 @@
 import React, { useEffect, useLayoutEffect, useState } from "react";
 import {
-  ActivityIndicator, KeyboardAvoidingView, Platform, Pressable,
+  ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { RootStackParamList } from "../types/navigation";
 import { MEDICINE_TYPES, MedicineInput, MedicineType } from "../types/medicine";
 import { useAuth } from "../services/AuthContext";
-import { addMedicine, getMedicine, updateMedicine } from "../database/medicineRepository";
+import {
+  addMedicine, getMedicine, setNotificationIds, updateMedicine,
+} from "../database/medicineRepository";
+import { cancelReminders, scheduleReminders } from "../services/notificationService";
+import { pickFromGallery, takePhoto } from "../services/photoService";
 import DateTimeField from "../components/DateTimeField";
 import ErrorMessage from "../components/ErrorMessage";
 import LoadingView from "../components/LoadingView";
@@ -57,6 +62,7 @@ export default function AddMedicineScreen({ navigation, route }: Props) {
   const [startDate, setStartDate] = useState<Date>(new Date());
   const [duration, setDuration] = useState(7);
   const [notes, setNotes] = useState("");
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(!!editingId);
@@ -78,6 +84,7 @@ export default function AddMedicineScreen({ navigation, route }: Props) {
           setStartDate(parseDateString(m.startDate));
           setDuration(m.durationDays);
           setNotes(m.notes);
+          setPhotoUri(m.photoUri);
         }
       } catch (e) {
         reportError("load medicine for edit", e);
@@ -87,6 +94,23 @@ export default function AddMedicineScreen({ navigation, route }: Props) {
       }
     })();
   }, [editingId, user]);
+
+  const runPhoto = async (action: () => Promise<string | null>) => {
+    try {
+      const uri = await action();
+      if (uri) setPhotoUri(uri); // null means the user cancelled
+    } catch (e) {
+      setError(reportError("medicine photo", e));
+    }
+  };
+
+  const handlePhoto = () => {
+    Alert.alert("Medicine photo", "Add a picture so the medicine is easy to recognise.", [
+      { text: "Take photo", onPress: () => runPhoto(takePhoto) },
+      { text: "Choose from gallery", onPress: () => runPhoto(pickFromGallery) },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  };
 
   const handleSave = async () => {
     if (!user) return;
@@ -99,7 +123,7 @@ export default function AddMedicineScreen({ navigation, route }: Props) {
       startDate: toDateString(startDate),
       durationDays: duration,
       notes: notes.trim(),
-      photoUri: null, // photos arrive in Stage 4
+      photoUri,
     };
 
     const problem = validateMedicine(input);
@@ -112,13 +136,34 @@ export default function AddMedicineScreen({ navigation, route }: Props) {
     setBusy(true);
     try {
       logger.info("Saving medicine started");
+      let id: number;
       if (editingId) {
+        const old = await getMedicine(user.uid, editingId);
+        if (old) await cancelReminders(old.notificationIds);
         await updateMedicine(user.uid, editingId, input);
+        id = editingId;
       } else {
-        await addMedicine(user.uid, input);
+        id = await addMedicine(user.uid, input);
+      }
+
+      // The medicine is already saved. A reminder problem must not undo that,
+      // so it is reported to the user instead of thrown.
+      const saved = await getMedicine(user.uid, id);
+      let warning: string | null = null;
+      if (saved) {
+        const result = await scheduleReminders(saved, { prompt: true });
+        await setNotificationIds(id, result.ids);
+        warning = result.warning;
       }
       logger.info("Saving medicine completed");
-      navigation.goBack();
+
+      if (warning) {
+        Alert.alert("Saved, but no reminder set", warning, [
+          { text: "OK", onPress: () => navigation.goBack() },
+        ]);
+      } else {
+        navigation.goBack();
+      }
     } catch (e) {
       reportError("save medicine", e);
       setError("Could not save the medicine. Please try again.");
@@ -131,6 +176,22 @@ export default function AddMedicineScreen({ navigation, route }: Props) {
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        <Pressable style={styles.photoBox} onPress={handlePhoto}>
+          {photoUri ? (
+            <Image source={{ uri: photoUri }} style={styles.photo} />
+          ) : (
+            <View style={styles.photoEmpty}>
+              <Ionicons name="camera" size={34} color={colors.primary} />
+              <Text style={styles.photoHint}>Add photo</Text>
+            </View>
+          )}
+        </Pressable>
+        {photoUri ? (
+          <Pressable onPress={() => setPhotoUri(null)}>
+            <Text style={styles.removePhoto}>Remove photo</Text>
+          </Pressable>
+        ) : null}
+
         <Text style={styles.label}>Medicine name</Text>
         <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="e.g. Paracetamol" editable={!busy} />
 
@@ -183,6 +244,14 @@ export default function AddMedicineScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
   container: { padding: spacing.lg, paddingBottom: 60 },
+  photoBox: {
+    alignSelf: "center", width: 116, height: 116, borderRadius: radius.lg, overflow: "hidden",
+    backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: colors.border,
+  },
+  photo: { width: "100%", height: "100%" },
+  photoEmpty: { flex: 1, alignItems: "center", justifyContent: "center" },
+  photoHint: { color: colors.primaryDark, fontWeight: "600", marginTop: 4 },
+  removePhoto: { textAlign: "center", color: colors.danger, marginTop: spacing.sm, fontWeight: "600" },
   label: { fontSize: 13, fontWeight: "600", color: colors.textMuted, marginBottom: 6, marginTop: spacing.md },
   input: {
     borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm,
