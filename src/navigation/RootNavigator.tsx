@@ -1,8 +1,9 @@
-import React, { useEffect } from "react";
-import { NavigationContainer } from "@react-navigation/native";
+import React, { useEffect, useRef } from "react";
+import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
+import * as Notifications from "expo-notifications";
 
 import { MainTabParamList, RootStackParamList } from "../types/navigation";
 import { useAuth } from "../services/AuthContext";
@@ -24,6 +25,7 @@ import SettingsScreen from "../screens/SettingsScreen";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
+const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
 const tabIcons: Record<
   keyof MainTabParamList,
@@ -58,6 +60,8 @@ function MainTabs() {
 
 export default function RootNavigator() {
   const { user, loading } = useAuth();
+  const handledRef = useRef<string | null>(null);
+  const lastResponse = Notifications.useLastNotificationResponse();
 
   // Rebuild reminders when a user signs in; clear them when signed out.
   useEffect(() => {
@@ -69,12 +73,28 @@ export default function RootNavigator() {
     }
   }, [user?.uid, loading]);
 
+  // Tapping a reminder opens that medicine (also works from a closed app).
+  useEffect(() => {
+    if (!user || !lastResponse) return;
+    const request = lastResponse.notification.request;
+    const key = `${request.identifier}-${lastResponse.notification.date}`;
+    if (handledRef.current === key) return;
+
+    const medicineId = Number(request.content.data?.medicineId);
+    if (!medicineId) return; // e.g. the test reminder has no medicine
+    handledRef.current = key;
+
+    const go = () => navigationRef.navigate("MedicineDetails", { medicineId });
+    if (navigationRef.isReady()) go();
+    else setTimeout(() => navigationRef.isReady() && go(), 800);
+  }, [lastResponse, user]);
+
   if (loading) {
     return <LoadingView message="Checking your session..." />;
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <Stack.Navigator
         screenOptions={{
           headerStyle: { backgroundColor: colors.primary },

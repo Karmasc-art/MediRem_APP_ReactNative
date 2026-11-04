@@ -36,3 +36,8 @@ export function describeDuration(durationDays: number): string {
   if (durationDays === 0) return "Every day";
   return durationDays === 1 ? "1 day" : `${durationDays} days`;
 }
+export interface DoseItem {
+  medicine: Medicine;
+  date: string;
+  status: MedicineStatus;
+}

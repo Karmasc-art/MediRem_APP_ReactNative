@@ -4,15 +4,18 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { RootStackParamList } from "../types/navigation";
-import { Medicine, describeDuration } from "../types/medicine";
+import { Medicine, MedicineStatus, describeDuration } from "../types/medicine";
 import { useAuth } from "../services/AuthContext";
 import { deleteMedicine, getMedicine } from "../database/medicineRepository";
+import { clearDose, getDoseStatus, markTaken } from "../database/historyRepository";
+import { cancelReminders } from "../services/notificationService";
+import { statusStyle } from "../components/MedicineCard";
 import ErrorMessage from "../components/ErrorMessage";
 import LoadingView from "../components/LoadingView";
-import { addDays, formatDateLong, formatTime } from "../utils/dateUtils";
+import { addDays, formatDateLong, formatTime, todayString } from "../utils/dateUtils";
 import { reportError } from "../utils/errorHandler";
 import { colors, radius, shadow, spacing } from "../utils/theme";
-import { cancelReminders } from "../services/notificationService";
+
 type Props = NativeStackScreenProps<RootStackParamList, "MedicineDetails">;
 
 function Row({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
@@ -31,13 +34,16 @@ export default function MedicineDetailsScreen({ navigation, route }: Props) {
   const { user } = useAuth();
   const { medicineId } = route.params;
   const [medicine, setMedicine] = useState<Medicine | null>(null);
+  const [status, setStatus] = useState<MedicineStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!user) return;
     try {
-      setMedicine(await getMedicine(user.uid, medicineId));
+      const m = await getMedicine(user.uid, medicineId);
+      setMedicine(m);
+      setStatus(m ? await getDoseStatus(m, todayString()) : null);
       setError(null);
     } catch (e) {
       reportError("load medicine details", e);
@@ -51,7 +57,7 @@ export default function MedicineDetailsScreen({ navigation, route }: Props) {
 
   const confirmDelete = useCallback(() => {
     if (!user || !medicine) return;
-    Alert.alert("Delete medicine", `Delete ${medicine.name}?`, [
+    Alert.alert("Delete medicine", `Delete ${medicine.name} and its history?`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
@@ -86,6 +92,18 @@ export default function MedicineDetailsScreen({ navigation, route }: Props) {
     });
   }, [navigation, medicine, confirmDelete]);
 
+  const toggleTaken = async () => {
+    if (!medicine) return;
+    try {
+      if (status === "taken") await clearDose(medicine.id, todayString());
+      else await markTaken(medicine.id, todayString());
+      await load();
+    } catch (e) {
+      reportError("toggle taken", e);
+      setError("Could not update the status. Please try again.");
+    }
+  };
+
   if (loading) return <LoadingView />;
 
   if (!medicine) {
@@ -97,6 +115,7 @@ export default function MedicineDetailsScreen({ navigation, route }: Props) {
     );
   }
 
+  const s = status ? statusStyle[status] : null;
   const schedule =
     medicine.durationDays === 0
       ? `From ${formatDateLong(medicine.startDate)}, every day`
@@ -117,6 +136,27 @@ export default function MedicineDetailsScreen({ navigation, route }: Props) {
       </View>
 
       <ErrorMessage message={error} />
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Today</Text>
+        {s ? (
+          <>
+            <View style={[styles.statusBadge, { backgroundColor: s.bg }]}>
+              <Text style={[styles.statusText, { color: s.fg }]}>{s.label}</Text>
+            </View>
+            <Pressable
+              style={[styles.button, status === "taken" && styles.buttonOutline]}
+              onPress={toggleTaken}
+            >
+              <Text style={[styles.buttonText, status === "taken" && styles.buttonOutlineText]}>
+                {status === "taken" ? "Undo taken" : "Mark as taken"}
+              </Text>
+            </Pressable>
+          </>
+        ) : (
+          <Text style={styles.muted}>Not scheduled for today.</Text>
+        )}
+      </View>
 
       <View style={styles.card}>
         <Row icon="time-outline" label="Schedule time" value={formatTime(medicine.scheduleTime)} />
@@ -140,6 +180,13 @@ const styles = StyleSheet.create({
   name: { fontSize: 26, fontWeight: "800", color: colors.primaryDark, marginTop: spacing.md, textAlign: "center" },
   dosage: { fontSize: 15, color: colors.textMuted, marginTop: 4 },
   card: { backgroundColor: colors.card, borderRadius: radius.md, padding: spacing.md, marginTop: spacing.md, ...shadow },
+  cardTitle: { fontSize: 16, fontWeight: "700", color: colors.text, marginBottom: spacing.sm },
+  statusBadge: { alignSelf: "flex-start", paddingHorizontal: 14, paddingVertical: 6, borderRadius: radius.pill },
+  statusText: { fontWeight: "800" },
+  button: { backgroundColor: colors.primary, borderRadius: radius.md, padding: 14, alignItems: "center", marginTop: spacing.md },
+  buttonText: { color: colors.white, fontWeight: "700", fontSize: 16 },
+  buttonOutline: { backgroundColor: colors.white, borderWidth: 1, borderColor: colors.primary },
+  buttonOutlineText: { color: colors.primary },
   row: { flexDirection: "row", alignItems: "center", paddingVertical: 10 },
   rowText: { marginLeft: spacing.md, flex: 1 },
   rowLabel: { fontSize: 12, color: colors.textMuted },
