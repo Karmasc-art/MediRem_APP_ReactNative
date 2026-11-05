@@ -1,4 +1,5 @@
 import * as Notifications from "expo-notifications";
+import { AndroidImportance } from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 import { Medicine } from "../types/medicine";
@@ -52,16 +53,23 @@ function channelIdFor(s: ReminderSettings): string {
   return `medirem-reminders-s${s.sound ? 1 : 0}-v${s.vibration ? 1 : 0}`;
 }
 
-async function ensureChannel(s: ReminderSettings): Promise<void> {
-  if (Platform.OS !== "android") return;
-  await Notifications.setNotificationChannelAsync(channelIdFor(s), {
-    name: `Medicine reminders (${s.sound ? "sound" : "silent"}${s.vibration ? ", vibrate" : ""})`,
-    importance: Notifications.AndroidImportance.MAX,
-    sound: s.sound ? "default" : null,
-    enableVibrate: s.vibration,
-    vibrationPattern: s.vibration ? [0, 300, 200, 300] : undefined,
-    lightColor: "#2E7D32",
-  });
+async function ensureChannel(s: ReminderSettings): Promise<string | undefined> {
+  if (Platform.OS !== "android") return undefined;
+  const id = channelIdFor(s);
+  try {
+    await Notifications.setNotificationChannelAsync(id, {
+      name: `Medicine reminders (${s.sound ? "sound" : "silent"}${s.vibration ? ", vibrate" : ""})`,
+      importance: AndroidImportance.MAX,
+      sound: s.sound ? "default" : null,
+      enableVibrate: s.vibration,
+      vibrationPattern: s.vibration ? [0, 300, 200, 300] : undefined,
+      lightColor: "#2E7D32",
+    });
+    return id;
+  } catch (error) {
+    logger.warn("Custom notification channel unavailable; using the Expo fallback channel", error);
+    return undefined;
+  }
 }
 
 export async function getPermissionState(): Promise<PermissionState> {
@@ -92,14 +100,6 @@ export async function cancelAllReminders(): Promise<void> {
   await Notifications.cancelAllScheduledNotificationsAsync();
 }
 
-/**
- * Schedules reminders for one medicine.
- * - "Every day" starting today or earlier: one repeating daily reminder.
- * - Fixed duration: one reminder per day.
- * - "Every day" with a future start: the first 7 days. They become a daily
- *   repeat the next time the app opens (see rescheduleAll).
- * Never throws; problems come back in `warning` so the screen can show them.
- */
 export async function scheduleReminders(
   medicine: Medicine,
   options: { prompt?: boolean } = {}
@@ -109,8 +109,9 @@ export async function scheduleReminders(
     return { ids: [], warning: "Reminders are turned off in Notification settings." };
   }
 
+  let channelId: string | undefined;
   try {
-    await ensureChannel(settings);
+    channelId = await ensureChannel(settings);
     const allowed = await hasPermission(!!options.prompt);
     if (!allowed) {
       return {
@@ -124,7 +125,6 @@ export async function scheduleReminders(
     return { ids: [], warning: "Notifications could not be set up on this device." };
   }
 
-  const channelId = channelIdFor(settings);
   const content: Notifications.NotificationContentInput = {
     title: "Time for your medicine",
     body: `${medicine.name} • ${medicine.dosage}`,
@@ -144,7 +144,7 @@ export async function scheduleReminders(
             type: Notifications.SchedulableTriggerInputTypes.DAILY,
             hour,
             minute,
-            channelId,
+            ...(channelId ? { channelId } : {}),
           },
         })
       );
@@ -160,7 +160,7 @@ export async function scheduleReminders(
             trigger: {
               type: Notifications.SchedulableTriggerInputTypes.DATE,
               date: when,
-              channelId,
+              ...(channelId ? { channelId } : {}),
             },
           })
         );
@@ -190,7 +190,7 @@ export async function rescheduleAll(userId: string): Promise<void> {
 /** Sends a reminder in 5 seconds. Returns false if notifications are not allowed. */
 export async function sendTestNotification(): Promise<boolean> {
   const settings = await loadSettings();
-  await ensureChannel(settings);
+  const channelId = await ensureChannel(settings);
   if (!(await hasPermission(true))) return false;
   await Notifications.scheduleNotificationAsync({
     content: {
@@ -201,7 +201,7 @@ export async function sendTestNotification(): Promise<boolean> {
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
       seconds: 5,
-      channelId: channelIdFor(settings),
+      ...(channelId ? { channelId } : {}),
     },
   });
   return true;
